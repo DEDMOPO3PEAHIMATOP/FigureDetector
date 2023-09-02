@@ -3,6 +3,11 @@ import random
 import math
 import json
 import os
+from torch.utils.data import Dataset
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torch.nn.functional as F
 
 
 class PictureDrawer:
@@ -124,9 +129,9 @@ class PictureDrawer:
             rotated_points = []
             for point in points:
                 x_rot = center[0] + math.cos(angle_rad) * (point[0] - center[0]) - math.sin(angle_rad) * (
-                            point[1] - center[1])
+                        point[1] - center[1])
                 y_rot = center[1] + math.sin(angle_rad) * (point[0] - center[0]) + math.cos(angle_rad) * (
-                            point[1] - center[1])
+                        point[1] - center[1])
                 rotated_points.append((x_rot, y_rot))
             x_min = min([rotated_points[i][0] for i in range(4)])
             x_max = max([rotated_points[i][0] for i in range(4)])
@@ -162,9 +167,9 @@ class PictureDrawer:
             rotated_points = []
             for point in points:
                 x_rot = center[0] + math.cos(angle_rad) * (point[0] - center[0]) - math.sin(angle_rad) * (
-                            point[1] - center[1])
+                        point[1] - center[1])
                 y_rot = center[1] + math.sin(angle_rad) * (point[0] - center[0]) + math.cos(angle_rad) * (
-                            point[1] - center[1])
+                        point[1] - center[1])
                 rotated_points.append((x_rot, y_rot))
             x_min = min([rotated_points[i][0] for i in range(4)])
             x_max = max([rotated_points[i][0] for i in range(4)])
@@ -312,6 +317,215 @@ class PictureDrawer:
                 json.dump(shapes, f)
             with open(data_filename, 'w') as f:
                 json.dump(data, f)
+
+
+class My_Dataset(Dataset):
+    """Класс генерации torch Dataset"""
+
+    def __init__(self, transform=False, aug=None, fly=False, folder=False):
+        self.fly = fly
+        self.folder = folder
+        if not self.fly:
+            with open(os.path.join(self.folder, 'data_json.json'), 'r') as f:
+                data = json.load(f)
+            print('Количество файлов', ':', len(data))
+            self.data_dict = data
+        else:
+            print('Количество картинок в обучении', ':', 1000)
+        if self.folder:
+            with open(os.path.join(self.folder, 'data_json.json'), 'r') as f:
+                data = json.load(f)
+            print('Количество файлов', ':', len(data))
+            self.data_dict = data
+        self.transform = transform
+        self.aug = aug
+
+    def __len__(self):
+        if self.fly:
+            return 1000
+        else:
+            return len(self.data_dict)
+
+    def __getitem__(self, idx):
+        if not self.transform:
+            self.transform = transforms.Compose([
+                # you may add anything, e.g. augmentation
+                # transforms.CenterCrop(size=120),
+                # transforms.Resize(size=(256, 256)),
+                transforms.ToTensor(),
+                # transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+            ])
+        if not self.fly:
+            index = str(idx + 1)
+            sample_dict = self.data_dict[index]
+            img_name = sample_dict['image']
+            file_dict = sample_dict['file']
+
+            with open(os.path.join(self.folder, file_dict), 'r') as f:
+                data = json.load(f)
+                labels = []
+                names = []
+                for i in range(5):
+                    names.append(data[i]['name'])
+                    labels.append([
+                        data[i]['region']['origin']['x'],
+                        data[i]['region']['origin']['y'],
+                        data[i]['region']['size']['width'],
+                        data[i]['region']['size']['height']
+                    ])
+            label = torch.LongTensor(labels)
+            image = Image.open(os.path.join('output', img_name))
+        else:
+            drawer.generate_shapes()
+            image, shapes, _ = drawer.draw_rectangles()
+            labels = []
+            names = []
+            for i in range(5):
+                names.append(shapes[i]['name'])
+                labels.append([
+                    shapes[i]['region']['origin']['x'],
+                    shapes[i]['region']['origin']['y'],
+                    shapes[i]['region']['size']['width'],
+                    shapes[i]['region']['size']['height']
+                ])
+            label = torch.LongTensor(labels)
+        if self.aug:
+            sample = self.aug(
+                image=image,
+            )
+        else:
+            if not self.fly:
+                sample = {
+                    'image': image,
+                    'label': label,
+                    'image_name': img_name,
+                    'file_name': file_dict,
+                    'names': names
+                }
+            else:
+                sample = {
+                    'image': image,
+                    'label': label,
+                    'image_name': 'fly',
+                    'file_name': 'fly',
+                    'names': names
+                }
+        if self.transform:
+            sample['image'] = self.transform(sample['image'])
+
+        return sample
+
+
+class UNet(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.enc_conv0 = nn.Sequential(
+            nn.Conv2d(in_channels=3, out_channels=64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU()
+        )
+        self.pool0 = nn.MaxPool2d(kernel_size=2, return_indices=True)  # 256 -> 128
+        self.enc_conv1 = nn.Sequential(
+            nn.Conv2d(in_channels=64, out_channels=128, kernel_size=3, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+            nn.Conv2d(in_channels=128, out_channels=128, kernel_size=3, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU()
+        )
+        self.pool1 = nn.MaxPool2d(kernel_size=2, return_indices=True)  # 128 -> 64
+        self.enc_conv2 = nn.Sequential(
+            nn.Conv2d(in_channels=128, out_channels=256, kernel_size=3, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(),
+            nn.Conv2d(in_channels=256, out_channels=256, kernel_size=3, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU()
+        )
+        self.pool2 = nn.MaxPool2d(kernel_size=2, return_indices=True)  # 64 -> 32
+        self.enc_conv3 = nn.Sequential(
+            nn.Conv2d(in_channels=256, out_channels=512, kernel_size=3, padding=1),
+            nn.BatchNorm2d(512),
+            nn.ReLU(),
+            nn.Conv2d(in_channels=512, out_channels=512, kernel_size=3, padding=1),
+            nn.BatchNorm2d(512),
+            nn.ReLU(),
+        )
+        self.pool3 = nn.MaxPool2d(kernel_size=2, return_indices=True)  # 32 -> 16
+        # bottleneck
+        self.bottleneck_conv = nn.Sequential(
+            nn.Conv2d(in_channels=512, out_channels=1024, kernel_size=1),
+            nn.BatchNorm2d(1024),
+            nn.ReLU(),
+            nn.Conv2d(in_channels=1024, out_channels=512, kernel_size=1),
+            nn.BatchNorm2d(512),
+            nn.ReLU(),
+        )
+        # decoder (upsampling)
+        self.upsample0 = nn.MaxUnpool2d(kernel_size=2)  # 16 -> 32
+        self.dec_conv0 = nn.Sequential(
+            nn.Conv2d(in_channels=1024, out_channels=512, kernel_size=3, padding=1),
+            nn.BatchNorm2d(512),
+            nn.ReLU(),
+            nn.Conv2d(in_channels=512, out_channels=256, kernel_size=3, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU()
+        )
+        self.upsample1 = nn.MaxUnpool2d(kernel_size=2)  # 32 -> 64
+        self.dec_conv1 = nn.Sequential(
+            nn.Conv2d(in_channels=512, out_channels=256, kernel_size=3, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(),
+            nn.Conv2d(in_channels=256, out_channels=128, kernel_size=3, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU()
+        )
+        self.upsample2 = nn.MaxUnpool2d(kernel_size=2)  # 64 -> 128
+        self.dec_conv2 = nn.Sequential(
+            nn.Conv2d(in_channels=256, out_channels=128, kernel_size=3, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+            nn.Conv2d(in_channels=128, out_channels=64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU()
+        )
+        self.upsample3 = nn.MaxUnpool2d(kernel_size=2)  # 128 -> 256
+        self.dec_conv3 = nn.Sequential(
+            nn.Conv2d(in_channels=128, out_channels=64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Conv2d(in_channels=64, out_channels=1, kernel_size=1),
+        )
+        self.fc1 = nn.Flatten()
+        self.fc2 = nn.Linear(256 * 256, 20)
+
+    def forward(self, x):
+        # encoder
+        enc0 = self.enc_conv0(x)
+        pool0, indices_e0 = self.pool0(enc0)
+        enc1 = self.enc_conv1(pool0)
+        pool1, indices_e1 = self.pool1(enc1)
+        enc2 = self.enc_conv2(pool1)
+        pool2, indices_e2 = self.pool2(enc2)
+        enc3 = self.enc_conv3(pool2)
+        pool3, indices_e3 = self.pool3(enc3)
+        # bottleneck
+        b = self.bottleneck_conv(pool3)
+        # decoder
+        d0 = self.dec_conv0(torch.cat((self.upsample0(b, indices_e3), enc3), dim=1))
+        d1 = self.dec_conv1(torch.cat((self.upsample1(d0, indices_e2), enc2), dim=1))
+        d2 = self.dec_conv2(torch.cat((self.upsample2(d1, indices_e1), enc1), dim=1))
+        d3 = self.dec_conv3(torch.cat((self.upsample3(d2, indices_e0), enc0), dim=1))  # no activation
+        d4 = self.fc1(d3)
+        d5 = self.fc2(d4)
+        d6 = d5.view(-1, 5, 4)
+        return d6
 
 
 def main():

@@ -103,7 +103,7 @@ class PictureDrawer:
             y = center[1] + int(radius * math.sin(math.radians(i)))
             points.append((x, y))
         self.draw.polygon(points, new_color)
-        return x1, y1, radius * 2, radius * 2
+        return center[0] - radius, center[1] - radius, radius * 2, radius * 2
 
     def draw_square(self, rectangle, new_color):
         # Рисуем квадрат
@@ -124,9 +124,9 @@ class PictureDrawer:
             rotated_points = []
             for point in points:
                 x_rot = center[0] + math.cos(angle_rad) * (point[0] - center[0]) - math.sin(angle_rad) * (
-                        point[1] - center[1])
+                            point[1] - center[1])
                 y_rot = center[1] + math.sin(angle_rad) * (point[0] - center[0]) + math.cos(angle_rad) * (
-                        point[1] - center[1])
+                            point[1] - center[1])
                 rotated_points.append((x_rot, y_rot))
             x_min = min([rotated_points[i][0] for i in range(4)])
             x_max = max([rotated_points[i][0] for i in range(4)])
@@ -162,9 +162,9 @@ class PictureDrawer:
             rotated_points = []
             for point in points:
                 x_rot = center[0] + math.cos(angle_rad) * (point[0] - center[0]) - math.sin(angle_rad) * (
-                        point[1] - center[1])
+                            point[1] - center[1])
                 y_rot = center[1] + math.sin(angle_rad) * (point[0] - center[0]) + math.cos(angle_rad) * (
-                        point[1] - center[1])
+                            point[1] - center[1])
                 rotated_points.append((x_rot, y_rot))
             x_min = min([rotated_points[i][0] for i in range(4)])
             x_max = max([rotated_points[i][0] for i in range(4)])
@@ -206,10 +206,10 @@ class PictureDrawer:
                         + math.sin(rotate_angle_rad) * (point[0] - center[0]) \
                         + math.cos(rotate_angle_rad) * (point[1] - center[1])
                 rotated_points.append((x_rot, y_rot))
-            x_min = min([rotated_points[i][0] for i in range(4)])
-            x_max = max([rotated_points[i][0] for i in range(4)])
-            y_min = min([rotated_points[i][1] for i in range(4)])
-            y_max = max([rotated_points[i][1] for i in range(4)])
+            x_min = min([rotated_points[i][0] for i in range(6)])
+            x_max = max([rotated_points[i][0] for i in range(6)])
+            y_min = min([rotated_points[i][1] for i in range(6)])
+            y_max = max([rotated_points[i][1] for i in range(6)])
             height = y_max - y_min
             width = x_max - x_min
             # Проверка на требование к размерам описывающего прямоугольника
@@ -257,6 +257,7 @@ class PictureDrawer:
                     figure = random.choice(self.figures)
                 else:
                     figure = self.figures[num_figures]
+                # self.draw.rectangle(rectangle)
                 self.draw_figure(rectangle, figure, new_color)
                 if num_figures >= len(self.figures):
                     num_figures = 0
@@ -292,14 +293,25 @@ class PictureDrawer:
             # Берем номер последнего файла
             last_num = int(last_file.split('.')[0])
 
+        # data = json.loads(data_json)
+        if 'data_json.json' in files and update:
+            data_filename = os.path.join(output_folder, 'data_json.json')
+            data = json.loads(data_filename)
+        else:
+            data = {}
+            data_filename = os.path.join(output_folder, 'data_json.json')
+
         for i in range(num_images):
             self.generate_shapes()
             image, shapes, figures = self.draw_rectangles()
             image_filename = os.path.join(output_folder, f'{last_num + i + 1:05}.png')
             image.save(image_filename)
             shape_filename = os.path.join(output_folder, f'{last_num + i + 1:05}.json')
+            data[last_num + i + 1] = {'image': f'{last_num + i + 1:05}.png', 'file': f'{last_num + i + 1:05}.json'}
             with open(shape_filename, 'w') as f:
                 json.dump(shapes, f)
+            with open(data_filename, 'w') as f:
+                json.dump(data, f)
 
 
 def main():

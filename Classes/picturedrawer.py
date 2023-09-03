@@ -6,6 +6,7 @@ import os
 from torch.utils.data import Dataset
 import torch
 import torch.nn as nn
+import torchvision.transforms as transforms
 import torch.optim as optim
 import torch.nn.functional as F
 
@@ -294,14 +295,15 @@ class PictureDrawer:
             # Сортируем файлы
             files.sort()
             # Берем последний
-            last_file = files[-1]
+            last_file = files[-2]
             # Берем номер последнего файла
             last_num = int(last_file.split('.')[0])
 
         # data = json.loads(data_json)
+        data_filename = os.path.join(output_folder, 'data_json.json')
         if 'data_json.json' in files and update:
-            data_filename = os.path.join(output_folder, 'data_json.json')
-            data = json.loads(data_filename)
+            with open(os.path.join(output_folder, 'data_json.json'), 'r') as f:
+                data = json.load(f)
         else:
             data = {}
             data_filename = os.path.join(output_folder, 'data_json.json')
@@ -315,8 +317,8 @@ class PictureDrawer:
             data[last_num + i + 1] = {'image': f'{last_num + i + 1:05}.png', 'file': f'{last_num + i + 1:05}.json'}
             with open(shape_filename, 'w') as f:
                 json.dump(shapes, f)
-            with open(data_filename, 'w') as f:
-                json.dump(data, f)
+        with open(data_filename, 'w') as f:
+            json.dump(data, f)
 
 
 class My_Dataset(Dataset):
@@ -325,7 +327,9 @@ class My_Dataset(Dataset):
     def __init__(self, transform=False, aug=None, fly=False, folder=False):
         self.fly = fly
         self.folder = folder
-        if not self.fly:
+        self.drawer = PictureDrawer(num_rectangles=5)
+
+        if not self.fly and self.folder:
             with open(os.path.join(self.folder, 'data_json.json'), 'r') as f:
                 data = json.load(f)
             print('Количество файлов', ':', len(data))
@@ -374,10 +378,10 @@ class My_Dataset(Dataset):
                         data[i]['region']['size']['height']
                     ])
             label = torch.LongTensor(labels)
-            image = Image.open(os.path.join('output', img_name))
+            image = Image.open(os.path.join(self.folder, img_name))
         else:
-            drawer.generate_shapes()
-            image, shapes, _ = drawer.draw_rectangles()
+            self.drawer.generate_shapes()
+            image, shapes, _ = self.drawer.draw_rectangles()
             labels = []
             names = []
             for i in range(5):
@@ -414,6 +418,26 @@ class My_Dataset(Dataset):
             sample['image'] = self.transform(sample['image'])
 
         return sample
+
+
+class ShapeDetector(nn.Module):
+    def __init__(self):
+        super(ShapeDetector, self).__init__()
+        self.conv1 = nn.Conv2d(3, 16, 3, padding=1)
+        self.conv2 = nn.Conv2d(16, 32, 3, padding=1)
+        self.conv3 = nn.Conv2d(32, 64, 3, padding=1)
+        self.pool = nn.MaxPool2d(2, 2)
+        self.fc1 = nn.Linear(64 * 32 * 32, 512)
+        self.fc2 = nn.Linear(512, 20)
+
+    def forward(self, x):
+        x = self.pool(F.relu(self.conv1(x)))
+        x = self.pool(F.relu(self.conv2(x)))
+        x = self.pool(F.relu(self.conv3(x)))
+        x = x.view(-1, 64 * 32 * 32)
+        x = F.relu(self.fc1(x))
+        x = self.fc2(x)
+        return x.view(-1, 5, 4)
 
 
 class UNet(nn.Module):

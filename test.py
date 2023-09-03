@@ -6,6 +6,7 @@ from IPython.display import clear_output
 import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image, ImageDraw
+from shapely.geometry import Polygon
 
 from Classes.picturedrawer import PictureDrawer
 from Classes.picturedrawer import My_Dataset
@@ -33,8 +34,6 @@ def train_cnn(epoch, loader, batch_size=32):
                         dict_names[fig_name] += 1
             optimizer.zero_grad()
             outputs = model(X_batch.to(device))
-            # outputs_model = model(X_batch.to(device))
-            # outputs = outputs_model.view(-1, 5, 4)
             loss = criterion(outputs, y_batch.to(device).float())
             loss.backward()
             optimizer.step()
@@ -70,7 +69,6 @@ def train_cnn(epoch, loader, batch_size=32):
                 x1, y1 = shapes[j][0], shapes[j][1]
                 x2, y2 = x1 + shapes[j][2], y1 + shapes[j][3]
                 draw.polygon([(x1, y1), (x1, y2), (x2, y2), (x2, y1)], outline='white')
-            #         shapes = outputs[i].detach().numpy()
             shapes = outputs[i].cpu()
             for j in range(5):
                 x1, y1 = shapes[j][0], shapes[j][1]
@@ -143,7 +141,7 @@ def eval_cnn(loader, batch_size=32):
     tp = len(iou)
     fp = iou_fp - tp
 
-    # Calculate precision and recall
+    # Вычисляем precision и recall
     precision = tp / (tp + fp)
     recall = tp / count
     return (precision,
@@ -158,6 +156,54 @@ def eval_cnn(loader, batch_size=32):
             iou_max,
             iou
             )
+
+
+def transfer_learning(epoch, train_epoch, status):
+    '''
+    Функция дообучения сети
+    '''
+    train_data = My_Dataset(fly=False, folder='work')
+    batch_size = 32
+    train_loader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, shuffle=True)
+    torch.cuda.empty_cache()
+    gc.collect()
+    model = ShapeDetector().to(device)
+    model.load_state_dict(torch.load('model_simple_start_learning.pth', map_location=torch.device(device)))
+    criterion = nn.MSELoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    history = train_cnn(train_epoch, train_loader, batch_size=32)
+    eval_output = eval_cnn(test_1_loader, batch_size=32)
+    status
+    status = status.append(
+        {
+            'test': f'{epoch}_test', \
+            'precision': eval_output[0], 'recall': eval_output[1], \
+            'iou_min': eval_output[8], 'iou_max': eval_output[9], \
+            'iou_mean': np.mean(eval_output[10]),
+            'triangle': '3000',
+            'square': '3000',
+            'rhombus': '6000',
+            'hexagon': '0',
+            'circle': '3000',
+            'total figures': '15000'
+        }, ignore_index=True
+    )
+    eval_output = eval_cnn(test_2_loader, batch_size=32)
+    status = status.append(
+        {
+            'test': f'{epoch}_test_hexagon', \
+            'precision': eval_output[0], 'recall': eval_output[1], \
+            'iou_min': eval_output[8], 'iou_max': eval_output[9], \
+            'iou_mean': np.mean(eval_output[10]),
+            'triangle': '3000',
+            'square': '3000',
+            'rhombus': '3000',
+            'hexagon': '3000',
+            'circle': '3000',
+            'total figures': '15000'
+        }, ignore_index=True
+    )
+    return status
 
 
 # Первый этап: генерация 100 рандомных картинок в папку first_stage
@@ -179,7 +225,7 @@ batch_size = 32
 train_loader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, shuffle=True)
 test_1_loader = torch.utils.data.DataLoader(test_1_data, batch_size=batch_size, shuffle=False)
 test_2_loader = torch.utils.data.DataLoader(test_2_data, batch_size=batch_size, shuffle=False)
-
+# Протестируем на динамической выборке
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(device)
 
@@ -196,5 +242,182 @@ criterion = nn.MSELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 # optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, betas=(0.9, 0.99))
 # exp_lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
-
 history = train_cnn(20, train_loader, batch_size=batch_size)
+torch.save(model.state_dict(), 'model_simple_fly.pth')
+fig, axes = plt.subplots(1, 2, figsize=(14, 4))
+axes[0].plot(history['epoch'], history['train_loss'], label='train_loss')
+for i in [0, 1]:
+    axes[i].legend()
+torch.cuda.empty_cache()
+gc.collect()
+model = ShapeDetector().to(device)
+model.load_state_dict(torch.load('model_simple_fly.pth', map_location=torch.device(device)))
+eval_output = eval_cnn(test_1_loader, batch_size=32)
+print('precision:', eval_output[0], 'recall:', eval_output[1])
+print('iou_min:', eval_output[8], 'iou_max:', eval_output[9])
+print('iou_mean:', np.mean(eval_output[10]))
+results = pd.DataFrame(
+    {
+        'test': ['test_1'], \
+        'precision': [eval_output[0]], 'recall': [eval_output[1]], \
+        'iou_min': [eval_output[8]], 'iou_max': [eval_output[9]], \
+        'iou_mean': [np.mean(eval_output[10])],
+        'triangle': ['1003'],
+        'square': ['988'],
+        'rhombus': ['996'],
+        'hexagon': ['1023'],
+        'circle': ['990'],
+        'total figures': ['5000']
+    }
+)
+print(results)
+plt.figure(figsize=(18, 6))
+plt.subplot(1, 2, 1)
+plt.axis("off")
+plt.imshow(np.rollaxis(eval_output[6].numpy(), 0, 3))
+plt.subplot(1, 2, 1)
+plt.axis("off")
+image = Image.new("RGB", (256, 256))
+draw = ImageDraw.Draw(image)
+shapes = np.array(eval_output[2])
+x1, y1 = shapes[0], shapes[1]
+x2, y2 = x1 + shapes[2], y1 + shapes[3]
+draw.polygon([(x1, y1), (x1, y2), (x2, y2), (x2, y1)], outline='white')
+shapes = np.array(eval_output[3])
+x1, y1 = shapes[0], shapes[1]
+x2, y2 = x1 + shapes[2], y1 + shapes[3]
+draw.polygon([(x1, y1), (x2, y1), (x2, y2), (x1, y2)], outline='red')
+plt.imshow(image)
+plt.title('iou_min, white - real, red - predicted')
+
+plt.subplot(1, 2, 2)
+plt.axis("off")
+plt.imshow(np.rollaxis(eval_output[6].numpy(), 0, 3))
+plt.subplot(1, 2, 2)
+plt.axis("off")
+image = Image.new("RGB", (256, 256))
+draw = ImageDraw.Draw(image)
+shapes = np.array(eval_output[4])
+x1, y1 = shapes[0], shapes[1]
+x2, y2 = x1 + shapes[2], y1 + shapes[5]
+draw.polygon([(x1, y1), (x1, y2), (x2, y2), (x2, y1)], outline='white')
+shapes = np.array(eval_output[5])
+x1, y1 = shapes[0], shapes[1]
+x2, y2 = x1 + shapes[2], y1 + shapes[3]
+draw.polygon([(x1, y1), (x2, y1), (x2, y2), (x1, y2)], outline='red')
+plt.imshow(image)
+plt.title('iou_max, white - real, red - predicted')
+
+plt.show()
+# Протестируем на статической выборке
+drawer.generate_images(5000, 'output', update=False)
+train_data = My_Dataset(fly=False, folder='output')
+batch_size = 32
+train_loader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, shuffle=True)
+torch.cuda.empty_cache()
+gc.collect()
+model = ShapeDetector().to(device)
+criterion = nn.MSELoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+history = train_cnn(20, train_loader, batch_size=batch_size)
+torch.save(model.state_dict(), 'model_simple_static.pth')
+fig, axes = plt.subplots(1, 2, figsize=(14, 4))
+axes[0].plot(history['epoch'], history['train_loss'], label='train_loss')
+for i in [0, 1]:
+    axes[i].legend()
+torch.cuda.empty_cache()
+gc.collect()
+model = ShapeDetector().to(device)
+model.load_state_dict(torch.load('model_simple_static.pth', map_location=torch.device(device)))
+eval_output = eval_cnn(test_2_loader, batch_size=32)
+print('precision:', eval_output[0], 'recall:', eval_output[1])
+print('iou_min:', eval_output[8], 'iou_max:', eval_output[9])
+print('iou_mean:', np.mean(eval_output[10]))
+results = results.append(
+    {
+        'test': 'test_2', \
+        'precision': eval_output[0], 'recall': eval_output[1], \
+        'iou_min': eval_output[8], 'iou_max': eval_output[9], \
+        'iou_mean': np.mean(eval_output[10]),
+        'triangle': '5004',
+        'square': '5075',
+        'rhombus': '5022',
+        'hexagon': '4955',
+        'circle': '4944',
+        'total figures': '25000'
+    }, ignore_index=True
+)
+print(results)
+plt.figure(figsize=(18, 6))
+plt.subplot(1, 2, 1)
+plt.axis("off")
+plt.imshow(np.rollaxis(eval_output[6].numpy(), 0, 3))
+plt.subplot(1, 2, 1)
+plt.axis("off")
+image = Image.new("RGB", (256, 256))
+draw = ImageDraw.Draw(image)
+shapes = np.array(eval_output[2])
+x1, y1 = shapes[0], shapes[1]
+x2, y2 = x1 + shapes[2], y1 + shapes[3]
+draw.polygon([(x1, y1), (x1, y2), (x2, y2), (x2, y1)], outline='white')
+shapes = np.array(eval_output[3])
+x1, y1 = shapes[0], shapes[1]
+x2, y2 = x1 + shapes[2], y1 + shapes[3]
+draw.polygon([(x1, y1), (x2, y1), (x2, y2), (x1, y2)], outline='red')
+plt.imshow(image)
+plt.title('iou_min, white - real, red - predicted')
+
+plt.subplot(1, 2, 2)
+plt.axis("off")
+plt.imshow(np.rollaxis(eval_output[6].numpy(), 0, 3))
+plt.subplot(1, 2, 2)
+plt.axis("off")
+image = Image.new("RGB", (256, 256))
+draw = ImageDraw.Draw(image)
+shapes = np.array(eval_output[4])
+x1, y1 = shapes[0], shapes[1]
+x2, y2 = x1 + shapes[2], y1 + shapes[5]
+draw.polygon([(x1, y1), (x1, y2), (x2, y2), (x2, y1)], outline='white')
+shapes = np.array(eval_output[5])
+x1, y1 = shapes[0], shapes[1]
+x2, y2 = x1 + shapes[2], y1 + shapes[3]
+draw.polygon([(x1, y1), (x2, y1), (x2, y2), (x1, y2)], outline='red')
+plt.imshow(image)
+plt.title('iou_max, white - real, red - predicted')
+plt.show()
+
+# Второй этап тренировок
+drawer = PictureDrawer(5, hexagon_status=False, random_status=False)
+drawer.generate_images(12000, 'work', update=False)
+drawer = PictureDrawer(5, hexagon_status=False, random_status=False)
+drawer.generate_images(3000, 'work_test', update=False)
+drawer = PictureDrawer(5, hexagon_status=True, random_status=False)
+drawer.generate_images(3000, 'work_test_hexagon', update=False)
+test_1_data = My_Dataset(folder='work_test', fly=False)
+test_2_data = My_Dataset(folder='work_test_hexagon', fly=False)
+test_1_loader = torch.utils.data.DataLoader(test_1_data, batch_size=batch_size, shuffle=False)
+test_2_loader = torch.utils.data.DataLoader(test_2_data, batch_size=batch_size, shuffle=False)
+torch.cuda.empty_cache()
+gc.collect()
+train_data = My_Dataset(fly=False, folder='work')
+test_1_data = My_Dataset(folder='work_test', fly=False)
+test_2_data = My_Dataset(folder='work_test_hexagon', fly=False)
+batch_size = 32
+train_loader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, shuffle=True)
+test_1_loader = torch.utils.data.DataLoader(test_1_data, batch_size=batch_size, shuffle=False)
+test_2_loader = torch.utils.data.DataLoader(test_2_data, batch_size=batch_size, shuffle=False)
+model = ShapeDetector().to(device)
+criterion = nn.MSELoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+history = train_cnn(20, train_loader, batch_size=32)
+torch.save(model.state_dict(), 'model_simple_start_learning.pth')
+fig, axes = plt.subplots(1, 2, figsize=(14, 4))
+axes[0].plot(history['epoch'], history['train_loss'], label='train_loss')
+for i in [0, 1]:
+    axes[i].legend()
+
+# Третий эиап тренировок
+for i in range(20):
+    drawer.generate_images(400, 'work', update=True)
+    results = transfer_learning(i, 20, status=results)
+print(results)

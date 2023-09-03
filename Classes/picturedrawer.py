@@ -299,7 +299,6 @@ class PictureDrawer:
             # Берем номер последнего файла
             last_num = int(last_file.split('.')[0])
 
-        # data = json.loads(data_json)
         data_filename = os.path.join(output_folder, 'data_json.json')
         if 'data_json.json' in files and update:
             with open(os.path.join(output_folder, 'data_json.json'), 'r') as f:
@@ -328,7 +327,6 @@ class My_Dataset(Dataset):
         self.fly = fly
         self.folder = folder
         self.drawer = PictureDrawer(num_rectangles=5)
-
         if not self.fly and self.folder:
             with open(os.path.join(self.folder, 'data_json.json'), 'r') as f:
                 data = json.load(f)
@@ -423,6 +421,13 @@ class My_Dataset(Dataset):
 class ShapeDetector(nn.Module):
     def __init__(self):
         super(ShapeDetector, self).__init__()
+        '''
+        Простая нейронная сеть с фильтром Conv2d и паддингом 1.
+        Перед разворачиванием сети в линейный слой изпользовал
+        макспуллинг.
+        Перед последним линейным слоем делаем активацию Relu.
+        На выходе преобразуем в массив размерностью (5, 4).
+        '''
         self.conv1 = nn.Conv2d(3, 16, 3, padding=1)
         self.conv2 = nn.Conv2d(16, 32, 3, padding=1)
         self.conv3 = nn.Conv2d(32, 64, 3, padding=1)
